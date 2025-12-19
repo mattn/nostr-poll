@@ -2,6 +2,14 @@ import { createRxNostr, createRxForwardReq, uniq, verify } from 'https://esm.sh/
 import { nip19 } from 'https://esm.sh/nostr-tools@2.7.0';
 import { filter, take, timeout } from 'https://esm.sh/rxjs@7.8.1';
 
+// Initialize nostr-login
+const nl = window.NostrLogin;
+nl.init({
+    bunkers: ['nsec.app', 'nsecbunker.com'],
+    methods: ['extension', 'local', 'connect'],
+    perms: 'sign_event:1018'
+});
+
 const rxNostr = createRxNostr({
     verifier: verify
 });
@@ -296,28 +304,41 @@ function escapeHtml(text) {
 async function submitVote() {
     if (selectedOption === null || !pollEvent) return;
 
-    if (!window.nostr) {
-        showStatus('NIP-07 extension not found. Please install a Nostr browser extension.', 'error');
-        return;
-    }
-
     const voteBtn = document.getElementById('vote-btn');
     voteBtn.disabled = true;
     showStatus('Submitting vote...', 'loading');
 
     try {
-        const voteEvent = {
-            kind: 1018,
-            content: '',
-            tags: [
-                ['e', pollEvent.id, '', 'poll'],
-                ['poll_option', '0', selectedOption]
-            ],
-            created_at: Math.floor(Date.now() / 1000)
-        };
-
-        console.log('Submitting vote event:', voteEvent);
-        const signedEvent = await window.nostr.signEvent(voteEvent);
+        // Use nostr-login to get signer
+        let signedEvent;
+        if (window.nostr) {
+            // Try NIP-07 extension first
+            const voteEvent = {
+                kind: 1018,
+                content: '',
+                tags: [
+                    ['e', pollEvent.id, '', 'poll'],
+                    ['poll_option', '0', selectedOption]
+                ],
+                created_at: Math.floor(Date.now() / 1000)
+            };
+            console.log('Submitting vote event:', voteEvent);
+            signedEvent = await window.nostr.signEvent(voteEvent);
+        } else {
+            // Use nostr-login
+            await window.NostrLogin.launch();
+            const voteEvent = {
+                kind: 1018,
+                content: '',
+                tags: [
+                    ['e', pollEvent.id, '', 'poll'],
+                    ['poll_option', '0', selectedOption]
+                ],
+                created_at: Math.floor(Date.now() / 1000)
+            };
+            console.log('Submitting vote event:', voteEvent);
+            signedEvent = await window.NostrLogin.signEvent(voteEvent);
+        }
         
         await publishEvent(signedEvent);
         
