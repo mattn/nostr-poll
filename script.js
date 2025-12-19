@@ -310,8 +310,11 @@ async function submitVote() {
     showStatus('Submitting vote...', 'loading');
 
     try {
+        showStatus('Checking login status...', 'loading');
         // Check if user is logged in with nostr-login
         const nlPubkey = await window.NostrLogin.getPubkey().catch(() => null);
+        
+        showStatus(`Login status: ${nlPubkey ? 'Logged in' : 'Not logged in'}`, 'loading');
         
         let signedEvent;
         const voteEvent = {
@@ -323,31 +326,35 @@ async function submitVote() {
             ],
             created_at: Math.floor(Date.now() / 1000)
         };
-        console.log('Submitting vote event:', voteEvent);
 
         // Try NIP-07 extension first, then nostr-login
         if (window.nostr && !nlPubkey) {
+            showStatus('Signing with extension...', 'loading');
             signedEvent = await window.nostr.signEvent(voteEvent);
         } else {
             // Use nostr-login
             if (!nlPubkey) {
-                showStatus('Please login to vote...', 'loading');
+                showStatus('Opening login...', 'loading');
                 await window.NostrLogin.launch();
+                showStatus('Login completed, signing event...', 'loading');
+            } else {
+                showStatus('Signing event...', 'loading');
             }
             
             // Wait for signEvent with timeout
             signedEvent = await Promise.race([
                 window.NostrLogin.signEvent(voteEvent),
                 new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Sign timeout')), 30000)
+                    setTimeout(() => reject(new Error('Sign timeout after 30s')), 30000)
                 )
             ]);
         }
         
         if (!signedEvent) {
-            throw new Error('Failed to sign event');
+            throw new Error('No signed event returned');
         }
         
+        showStatus('Publishing vote...', 'loading');
         await publishEvent(signedEvent);
         
         showStatus('Vote submitted successfully!', 'success');
@@ -357,8 +364,8 @@ async function submitVote() {
             displayPoll(pollEvent, true);
         }, 1000);
     } catch (error) {
-        console.error('Vote error:', error);
-        showStatus(`Failed to submit vote: ${error.message}`, 'error');
+        const errorMsg = error.message || error.toString();
+        showStatus(`Error: ${errorMsg}`, 'error');
         voteBtn.disabled = false;
     }
 }
