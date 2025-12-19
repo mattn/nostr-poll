@@ -2,23 +2,33 @@ import { createRxNostr, createRxForwardReq, uniq, verify } from 'https://esm.sh/
 import { nip19 } from 'https://esm.sh/nostr-tools@2.7.0';
 import { filter, take, timeout } from 'https://esm.sh/rxjs@7.8.1';
 
-// Initialize nostr-login
-window.addEventListener('nlAuth', (e) => {
-    console.log('nlAuth event:', e.detail);
-    showStatus(`Authenticated: ${e.detail?.type || 'unknown'}`, 'success');
-});
+// Wait for NostrLogin to be available
+function initNostrLogin() {
+    if (window.NostrLogin) {
+        window.addEventListener('nlAuth', (e) => {
+            console.log('nlAuth event:', e.detail);
+            showStatus(`Authenticated: ${e.detail?.type || 'unknown'}`, 'success');
+        });
 
-window.addEventListener('nlLogout', () => {
-    console.log('nlLogout event');
-    showStatus('Logged out', 'success');
-});
+        window.addEventListener('nlLogout', () => {
+            console.log('nlLogout event');
+            showStatus('Logged out', 'success');
+        });
 
-const nl = window.NostrLogin;
-nl.init({
-    bunkers: ['nsec.app', 'nsecbunker.com'],
-    methods: ['extension', 'local', 'connect'],
-    darkMode: false
-});
+        window.NostrLogin.init({
+            bunkers: ['nsec.app', 'nsecbunker.com'],
+            methods: ['extension', 'local', 'connect'],
+            darkMode: false
+        });
+    }
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initNostrLogin);
+} else {
+    initNostrLogin();
+}
 
 const rxNostr = createRxNostr({
     verifier: verify
