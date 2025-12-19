@@ -3,11 +3,20 @@ import { nip19 } from 'https://esm.sh/nostr-tools@2.7.0';
 import { filter, take, timeout } from 'https://esm.sh/rxjs@7.8.1';
 
 // Initialize nostr-login
+window.addEventListener('nlAuth', (e) => {
+    console.log('nlAuth event:', e.detail);
+    showStatus(`Authenticated: ${e.detail?.type || 'unknown'}`, 'success');
+});
+
+window.addEventListener('nlLogout', () => {
+    console.log('nlLogout event');
+    showStatus('Logged out', 'success');
+});
+
 const nl = window.NostrLogin;
 nl.init({
     bunkers: ['nsec.app', 'nsecbunker.com'],
     methods: ['extension', 'local', 'connect'],
-    perms: 'sign_event:1018',
     darkMode: false
 });
 
@@ -352,12 +361,12 @@ async function submitVote() {
                 showStatus(`Logged in as ${nlPubkey.slice(0, 8)}...`, 'loading');
             }
             
-            showStatus('Requesting signature...', 'loading');
+            showStatus('Requesting signature (check nsec.app)...', 'loading');
             // Wait for signEvent with timeout
             signedEvent = await Promise.race([
                 window.NostrLogin.signEvent(voteEvent),
                 new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Signature request timeout (30s). Please try again.')), 30000)
+                    setTimeout(() => reject(new Error('No response from nsec.app after 60s. Please refresh and try again.')), 60000)
                 )
             ]);
         }
