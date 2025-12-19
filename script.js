@@ -312,9 +312,18 @@ async function submitVote() {
     try {
         showStatus('Checking login status...', 'loading');
         // Check if user is logged in with nostr-login
-        const nlPubkey = await window.NostrLogin.getPubkey().catch(() => null);
+        let nlPubkey;
+        try {
+            nlPubkey = await Promise.race([
+                window.NostrLogin.getPubkey(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('getPubkey timeout')), 5000))
+            ]);
+        } catch (e) {
+            nlPubkey = null;
+            showStatus('getPubkey failed or timeout, trying anyway...', 'loading');
+        }
         
-        showStatus(`Login status: ${nlPubkey ? 'Logged in' : 'Not logged in'}`, 'loading');
+        showStatus(`Login: ${nlPubkey ? nlPubkey.slice(0, 8) + '...' : 'none'}`, 'loading');
         
         let signedEvent;
         const voteEvent = {
@@ -324,37 +333,41 @@ async function submitVote() {
                 ['e', pollEvent.id, '', 'poll'],
                 ['poll_option', '0', selectedOption]
             ],
-            created_at: Math.floor(Date.now() / 1000)
+            created_at: Math.floor(Date.now() / 1000),
+            pubkey: nlPubkey || ''
         };
 
         // Try NIP-07 extension first, then nostr-login
-        if (window.nostr && !nlPubkey) {
-            showStatus('Signing with extension...', 'loading');
+        if (window.nostr && typeof window.nostr.signEvent === 'function' && !nlPubkey) {
+            showStatus('Using NIP-07 extension...', 'loading');
             signedEvent = await window.nostr.signEvent(voteEvent);
         } else {
             // Use nostr-login
             if (!nlPubkey) {
-                showStatus('Opening login...', 'loading');
+                showStatus('Please login (redirecting)...', 'loading');
                 await window.NostrLogin.launch();
-                showStatus('Login completed, signing event...', 'loading');
-            } else {
-                showStatus('Signing event...', 'loading');
+                showStatus('Returned from login, getting pubkey...', 'loading');
+                nlPubkey = await window.NostrLogin.getPubkey();
+                voteEvent.pubkey = nlPubkey;
+                showStatus(`Logged in as ${nlPubkey.slice(0, 8)}...`, 'loading');
             }
             
+            showStatus('Requesting signature...', 'loading');
             // Wait for signEvent with timeout
             signedEvent = await Promise.race([
                 window.NostrLogin.signEvent(voteEvent),
                 new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Sign timeout after 30s')), 30000)
+                    setTimeout(() => reject(new Error('Signature request timeout (30s). Please try again.')), 30000)
                 )
             ]);
         }
         
-        if (!signedEvent) {
-            throw new Error('No signed event returned');
+        showStatus('Signature received, checking...', 'loading');
+        if (!signedEvent || !signedEvent.sig) {
+            throw new Error('Invalid signed event: ' + JSON.stringify(signedEvent));
         }
         
-        showStatus('Publishing vote...', 'loading');
+        showStatus('Publishing vote to relays...', 'loading');
         await publishEvent(signedEvent);
         
         showStatus('Vote submitted successfully!', 'success');
