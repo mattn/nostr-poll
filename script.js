@@ -340,6 +340,7 @@ async function displayPoll(event, showResults = false) {
     
     // Check if user already voted
     const userVotedOption = await checkUserVote(event.id);
+    console.log('User voted option:', userVotedOption);
     
     // Fetch author profile
     const profile = await fetchAuthorProfile(event.pubkey);
@@ -363,6 +364,7 @@ async function displayPoll(event, showResults = false) {
                 const votes = voteResults[opt.id] || 0;
                 const percentage = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
                 const isUserVote = userVotedOption === opt.id;
+                console.log(`Option ${opt.id}: isUserVote=${isUserVote}, userVotedOption=${userVotedOption}`);
                 return `
                     <li class="poll-option ${showResults ? 'with-results' : ''} ${isUserVote ? 'user-voted' : ''}" data-option-id="${escapeHtml(opt.id)}">
                         <span class="option-text">${replaceEmojis(opt.text, emojis)} ${isUserVote ? '<span class="voted-mark">✓</span>' : ''}</span>
