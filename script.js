@@ -79,6 +79,67 @@ async function fetchPollEvent(eventId) {
     });
 }
 
+async function checkUserVote(pollEventId) {
+    try {
+        // Get current user's pubkey
+        let userPubkey = null;
+        if (window.nostr && typeof window.nostr.getPublicKey === 'function') {
+            userPubkey = await window.nostr.getPublicKey();
+        } else if (window.NostrLogin) {
+            userPubkey = await window.NostrLogin.getPubkey().catch(() => null);
+        }
+        
+        if (!userPubkey) {
+            return null; // Not logged in
+        }
+        
+        console.log('Checking vote for user:', userPubkey);
+        
+        return new Promise((resolve) => {
+            const rxReq = createRxForwardReq();
+            let userVote = null;
+
+            rxNostr.use(rxReq).pipe(
+                uniq(),
+                timeout(3000)
+            ).subscribe({
+                next: (packet) => {
+                    if (packet.event && packet.event.kind === 1018 && packet.event.pubkey === userPubkey) {
+                        // Find the vote option
+                        for (const tag of packet.event.tags) {
+                            let optionId = null;
+                            if (tag[0] === 'poll_option' && tag[2]) {
+                                optionId = tag[2];
+                            } else if (tag[0] === 'response' && tag[1]) {
+                                optionId = tag[1];
+                            }
+                            
+                            if (optionId) {
+                                userVote = optionId;
+                                console.log('User already voted for:', optionId);
+                                break;
+                            }
+                        }
+                    }
+                },
+                error: () => resolve(userVote),
+                complete: () => resolve(userVote)
+            });
+
+            rxReq.emit({
+                kinds: [1018],
+                authors: [userPubkey],
+                '#e': [pollEventId]
+            });
+
+            setTimeout(() => resolve(userVote), 3000);
+        });
+    } catch (error) {
+        console.error('Error checking user vote:', error);
+        return null;
+    }
+}
+
 async function fetchVoteResults(pollEventId) {
     console.log('Fetching votes for poll ID:', pollEventId);
     return new Promise((resolve) => {
@@ -267,6 +328,9 @@ async function displayPoll(event, showResults = false) {
         showStatus('Loading results...', 'loading');
     }
     
+    // Check if user already voted
+    const userVotedOption = await checkUserVote(event.id);
+    
     // Fetch author profile
     const profile = await fetchAuthorProfile(event.pubkey);
     const authorName = profile?.name || profile?.display_name || event.pubkey.slice(0, 8) + '...';
@@ -283,13 +347,15 @@ async function displayPoll(event, showResults = false) {
     
     container.innerHTML = `
         <div class="poll-question">${replaceEmojis(question, emojis)}</div>
+        ${userVotedOption ? `<div class="user-voted-notice">✓ 投票済み</div>` : ''}
         <ul class="poll-options" id="options-list">
             ${options.map((opt, idx) => {
                 const votes = voteResults[opt.id] || 0;
                 const percentage = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
+                const isUserVote = userVotedOption === opt.id;
                 return `
-                    <li class="poll-option ${showResults ? 'with-results' : ''}" data-option-id="${escapeHtml(opt.id)}">
-                        <span class="option-text">${replaceEmojis(opt.text, emojis)}</span>
+                    <li class="poll-option ${showResults ? 'with-results' : ''} ${isUserVote ? 'user-voted' : ''}" data-option-id="${escapeHtml(opt.id)}">
+                        <span class="option-text">${replaceEmojis(opt.text, emojis)} ${isUserVote ? '<span class="voted-mark">✓</span>' : ''}</span>
                         ${showResults ? `<span class="option-votes">${votes}票 (${percentage}%)</span>` : ''}
                         ${showResults ? `<div class="vote-bar" style="width: ${percentage}%"></div>` : ''}
                     </li>

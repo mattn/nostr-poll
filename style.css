@@ -84,8 +84,19 @@ h1 {
     font-size: 20px;
     font-weight: 600;
     color: #333;
-    margin-bottom: 24px;
+    margin-bottom: 16px;
     line-height: 1.5;
+}
+
+.user-voted-notice {
+    background: #e8f5e9;
+    color: #2e7d32;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    text-align: center;
+    font-weight: 500;
 }
 
 .poll-options {
@@ -116,6 +127,17 @@ h1 {
 
 .poll-option.with-results {
     cursor: default;
+}
+
+.poll-option.user-voted {
+    border-color: #4caf50;
+    background: #f1f8f4;
+}
+
+.voted-mark {
+    color: #4caf50;
+    font-weight: bold;
+    margin-left: 4px;
 }
 
 .vote-bar {
