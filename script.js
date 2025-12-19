@@ -7,7 +7,8 @@ const nl = window.NostrLogin;
 nl.init({
     bunkers: ['nsec.app', 'nsecbunker.com'],
     methods: ['extension', 'local', 'connect'],
-    perms: 'sign_event:1018'
+    perms: 'sign_event:1018',
+    darkMode: false
 });
 
 const rxNostr = createRxNostr({
@@ -333,7 +334,14 @@ async function submitVote() {
                 showStatus('Please login to vote...', 'loading');
                 await window.NostrLogin.launch();
             }
-            signedEvent = await window.NostrLogin.signEvent(voteEvent);
+            
+            // Wait for signEvent with timeout
+            signedEvent = await Promise.race([
+                window.NostrLogin.signEvent(voteEvent),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Sign timeout')), 30000)
+                )
+            ]);
         }
         
         if (!signedEvent) {
