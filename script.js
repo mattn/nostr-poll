@@ -209,15 +209,41 @@ function parseEmojis(event) {
 }
 
 function replaceEmojis(text, emojis) {
-    let result = escapeHtml(text);
+    // Parse text and replace emoji shortcodes with img tags
+    let parts = [text];
+    
     for (const [shortcode, url] of Object.entries(emojis)) {
-        const escapedShortcode = escapeHtml(shortcode);
-        result = result.replace(
-            new RegExp(escapedShortcode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
-            `<img src="${escapeHtml(url)}" alt="${escapedShortcode}" class="custom-emoji" title="${escapedShortcode}">`
-        );
+        const newParts = [];
+        for (const part of parts) {
+            if (typeof part === 'string') {
+                const segments = part.split(shortcode);
+                for (let i = 0; i < segments.length; i++) {
+                    if (i > 0) {
+                        // Add emoji img element as object
+                        newParts.push({
+                            type: 'emoji',
+                            url: url,
+                            shortcode: shortcode
+                        });
+                    }
+                    newParts.push(segments[i]);
+                }
+            } else {
+                newParts.push(part);
+            }
+        }
+        parts = newParts;
     }
-    return result;
+    
+    // Build safe HTML
+    return parts.map(part => {
+        if (typeof part === 'string') {
+            return escapeHtml(part);
+        } else if (part.type === 'emoji') {
+            return `<img src="${escapeHtml(part.url)}" alt="${escapeHtml(part.shortcode)}" class="custom-emoji" title="${escapeHtml(part.shortcode)}">`;
+        }
+        return '';
+    }).join('');
 }
 
 async function displayPoll(event, showResults = false) {
