@@ -309,35 +309,35 @@ async function submitVote() {
     showStatus('Submitting vote...', 'loading');
 
     try {
-        // Use nostr-login to get signer
+        // Check if user is logged in with nostr-login
+        const nlPubkey = await window.NostrLogin.getPubkey().catch(() => null);
+        
         let signedEvent;
-        if (window.nostr) {
-            // Try NIP-07 extension first
-            const voteEvent = {
-                kind: 1018,
-                content: '',
-                tags: [
-                    ['e', pollEvent.id, '', 'poll'],
-                    ['poll_option', '0', selectedOption]
-                ],
-                created_at: Math.floor(Date.now() / 1000)
-            };
-            console.log('Submitting vote event:', voteEvent);
+        const voteEvent = {
+            kind: 1018,
+            content: '',
+            tags: [
+                ['e', pollEvent.id, '', 'poll'],
+                ['poll_option', '0', selectedOption]
+            ],
+            created_at: Math.floor(Date.now() / 1000)
+        };
+        console.log('Submitting vote event:', voteEvent);
+
+        // Try NIP-07 extension first, then nostr-login
+        if (window.nostr && !nlPubkey) {
             signedEvent = await window.nostr.signEvent(voteEvent);
         } else {
             // Use nostr-login
-            await window.NostrLogin.launch();
-            const voteEvent = {
-                kind: 1018,
-                content: '',
-                tags: [
-                    ['e', pollEvent.id, '', 'poll'],
-                    ['poll_option', '0', selectedOption]
-                ],
-                created_at: Math.floor(Date.now() / 1000)
-            };
-            console.log('Submitting vote event:', voteEvent);
+            if (!nlPubkey) {
+                showStatus('Please login to vote...', 'loading');
+                await window.NostrLogin.launch();
+            }
             signedEvent = await window.NostrLogin.signEvent(voteEvent);
+        }
+        
+        if (!signedEvent) {
+            throw new Error('Failed to sign event');
         }
         
         await publishEvent(signedEvent);
