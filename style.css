@@ -89,14 +89,19 @@ h1 {
 }
 
 .user-voted-notice {
-    background: #e8f5e9;
+    background: #e8f5e8;
     color: #2e7d32;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 14px;
-    margin-bottom: 16px;
-    text-align: center;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border-left: 4px solid #4caf50;
     font-weight: 500;
+    text-align: left;
+}
+
+.user-voted-notice small {
+    color: #666;
+    font-weight: normal;
 }
 
 .poll-options {
@@ -201,6 +206,16 @@ h1 {
     border-top: 1px solid #e0e0e0;
     font-size: 14px;
     color: #666;
+}
+
+.current-user {
+    font-size: 12px;
+    color: #666;
+    margin-top: 8px;
+    padding: 4px 8px;
+    background: #f5f5f5;
+    border-radius: 4px;
+    display: inline-block;
 }
 
 .poll-author {

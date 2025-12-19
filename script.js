@@ -89,25 +89,31 @@ async function fetchPollEvent(eventId) {
     });
 }
 
+async function getUserPubkey() {
+    try {
+        if (window.NostrLogin) {
+            return await window.NostrLogin.getPubkey().catch(() => null);
+        } else if (window.nostr && typeof window.nostr.getPublicKey === 'function') {
+            return await window.nostr.getPublicKey();
+        }
+        return null;
+    } catch (error) {
+        console.log('Failed to get user pubkey:', error);
+        return null;
+    }
+}
+
 async function checkUserVote(pollEventId) {
     try {
-        // Get current user's pubkey
-        let userPubkey = null;
-        if (window.nostr && typeof window.nostr.getPublicKey === 'function') {
-            userPubkey = await window.nostr.getPublicKey();
-        } else if (window.NostrLogin) {
-            userPubkey = await window.NostrLogin.getPubkey().catch(() => null);
-        }
-        
-        if (!userPubkey) {
-            return null; // Not logged in
-        }
+        const userPubkey = await getUserPubkey();
+        if (!userPubkey) return null;
         
         console.log('Checking vote for user:', userPubkey);
         
         return new Promise((resolve) => {
             const rxReq = createRxForwardReq();
-            let userVote = null;
+            let latestVote = null;
+            let latestTimestamp = 0;
 
             rxNostr.use(rxReq).pipe(
                 uniq(),
@@ -115,25 +121,29 @@ async function checkUserVote(pollEventId) {
             ).subscribe({
                 next: (packet) => {
                     if (packet.event && packet.event.kind === 1018 && packet.event.pubkey === userPubkey) {
-                        // Find the vote option
-                        for (const tag of packet.event.tags) {
-                            let optionId = null;
-                            if (tag[0] === 'poll_option' && tag[2]) {
-                                optionId = tag[2];
-                            } else if (tag[0] === 'response' && tag[1]) {
-                                optionId = tag[1];
-                            }
-                            
-                            if (optionId) {
-                                userVote = optionId;
-                                console.log('User already voted for:', optionId);
-                                break;
+                        // Only consider the latest vote
+                        if (packet.event.created_at > latestTimestamp) {
+                            // Find the vote option
+                            for (const tag of packet.event.tags) {
+                                let optionId = null;
+                                if (tag[0] === 'poll_option' && tag[2]) {
+                                    optionId = tag[2];
+                                } else if (tag[0] === 'response' && tag[1]) {
+                                    optionId = tag[1];
+                                }
+                                
+                                if (optionId) {
+                                    latestVote = optionId;
+                                    latestTimestamp = packet.event.created_at;
+                                    console.log('Found vote for option:', optionId, 'at', new Date(packet.event.created_at * 1000));
+                                    break;
+                                }
                             }
                         }
                     }
                 },
-                error: () => resolve(userVote),
-                complete: () => resolve(userVote)
+                error: () => resolve(latestVote),
+                complete: () => resolve(latestVote)
             });
 
             rxReq.emit({
@@ -142,7 +152,7 @@ async function checkUserVote(pollEventId) {
                 '#e': [pollEventId]
             });
 
-            setTimeout(() => resolve(userVote), 3000);
+            setTimeout(() => resolve(latestVote), 3000);
         });
     } catch (error) {
         console.error('Error checking user vote:', error);
@@ -153,7 +163,7 @@ async function checkUserVote(pollEventId) {
 async function fetchVoteResults(pollEventId) {
     console.log('Fetching votes for poll ID:', pollEventId);
     return new Promise((resolve) => {
-        const votes = {};
+        const userVotes = {}; // pubkey -> {optionId, timestamp}
         let eventCount = 0;
         const rxReq = createRxForwardReq();
 
@@ -165,11 +175,6 @@ async function fetchVoteResults(pollEventId) {
                 if (packet.event && packet.event.kind === 1018) {
                     eventCount++;
                     console.log(`Vote event #${eventCount}:`, packet.event);
-                    console.log('Tags:', packet.event.tags);
-                    
-                    // Check e tag first
-                    const eTag = packet.event.tags.find(t => t[0] === 'e');
-                    console.log('e tag:', eTag);
                     
                     // Find poll_option or response tag
                     for (const tag of packet.event.tags) {
@@ -185,19 +190,33 @@ async function fetchVoteResults(pollEventId) {
                         }
                         
                         if (optionId) {
-                            console.log('Found vote for option:', optionId);
-                            votes[optionId] = (votes[optionId] || 0) + 1;
-                            break; // Only count one vote per event
+                            const pubkey = packet.event.pubkey;
+                            const timestamp = packet.event.created_at;
+                            
+                            // Only keep the latest vote from each user
+                            if (!userVotes[pubkey] || userVotes[pubkey].timestamp < timestamp) {
+                                userVotes[pubkey] = { optionId, timestamp };
+                                console.log(`Updated vote for ${pubkey.slice(0, 8)}: ${optionId}`);
+                            }
+                            break;
                         }
                     }
                 }
             },
             error: () => {
+                const votes = {};
+                Object.values(userVotes).forEach(vote => {
+                    votes[vote.optionId] = (votes[vote.optionId] || 0) + 1;
+                });
                 console.log(`Total vote events received: ${eventCount}`);
                 console.log('Final votes:', votes);
                 resolve(votes);
             },
             complete: () => {
+                const votes = {};
+                Object.values(userVotes).forEach(vote => {
+                    votes[vote.optionId] = (votes[vote.optionId] || 0) + 1;
+                });
                 console.log(`Total vote events received: ${eventCount}`);
                 console.log('Final votes:', votes);
                 resolve(votes);
@@ -215,6 +234,10 @@ async function fetchVoteResults(pollEventId) {
         });
 
         setTimeout(() => {
+            const votes = {};
+            Object.values(userVotes).forEach(vote => {
+                votes[vote.optionId] = (votes[vote.optionId] || 0) + 1;
+            });
             console.log(`Timeout - Total vote events received: ${eventCount}`);
             console.log('Timeout - Final votes:', votes);
             resolve(votes);
@@ -333,14 +356,30 @@ async function displayPoll(event, showResults = false) {
     // Parse custom emojis
     const emojis = parseEmojis(event);
     
+    // Check if user already voted and get user info
+    const userVotedOption = await checkUserVote(event.id);
+    
+    // If user voted and showResults is not explicitly set, show results
+    if (userVotedOption && !showResults) {
+        showResults = true;
+    }
+    
     // Show loading state if fetching results
     if (showResults) {
         showStatus('Loading results...', 'loading');
     }
     
-    // Check if user already voted
-    const userVotedOption = await checkUserVote(event.id);
+    // Get current user info
+    const currentUserPubkey = await getUserPubkey();
+    let currentUserName = null;
+    
+    if (currentUserPubkey) {
+        const userProfile = await fetchAuthorProfile(currentUserPubkey);
+        currentUserName = userProfile?.name || userProfile?.display_name || currentUserPubkey.slice(0, 8) + '...';
+    }
+    
     console.log('User voted option:', userVotedOption);
+    console.log('Current user:', currentUserPubkey?.slice(0, 8));
     
     // Fetch author profile
     const profile = await fetchAuthorProfile(event.pubkey);
@@ -356,9 +395,21 @@ async function displayPoll(event, showResults = false) {
         showStatus('Results loaded', 'success');
     }
     
+    // Find the voted option text
+    let votedOptionText = '';
+    if (userVotedOption) {
+        const votedOpt = options.find(opt => opt.id === userVotedOption);
+        votedOptionText = votedOpt ? votedOpt.text : `選択肢 ${userVotedOption}`;
+    }
+    
     container.innerHTML = `
         <div class="poll-question">${replaceEmojis(question, emojis)}</div>
-        ${userVotedOption ? `<div class="user-voted-notice">✓ 投票済み</div>` : ''}
+        ${userVotedOption ? `
+            <div class="user-voted-notice">
+                ✓ 投票済み: "${replaceEmojis(votedOptionText, emojis)}"
+                ${currentUserName ? `<br><small>アカウント: ${currentUserName}</small>` : ''}
+            </div>
+        ` : ''}
         <ul class="poll-options" id="options-list">
             ${options.map((opt, idx) => {
                 const votes = voteResults[opt.id] || 0;
@@ -374,7 +425,7 @@ async function displayPoll(event, showResults = false) {
                 `;
             }).join('')}
         </ul>
-        <button class="vote-button" id="vote-btn" ${showResults ? '' : 'disabled'}>${showResults ? '結果を更新' : '投票する'}</button>
+        <button class="vote-button" id="vote-btn" ${showResults ? '' : userVotedOption ? '' : 'disabled'}>${showResults ? '結果を更新' : userVotedOption ? '結果を表示' : '投票する'}</button>
         <div class="poll-meta">
             <div class="poll-author">
                 ${authorPicture ? `<img src="${escapeHtml(authorPicture)}" alt="${escapeHtml(authorName)}" class="author-avatar">` : ''}
@@ -382,22 +433,32 @@ async function displayPoll(event, showResults = false) {
             </div>
             <div class="poll-time">${new Date(event.created_at * 1000).toLocaleString('ja-JP')}</div>
             ${showResults ? `<div class="poll-total">総投票数: ${totalVotes}</div>` : ''}
+            ${currentUserPubkey ? `<div class="current-user">現在のアカウント: ${currentUserName || currentUserPubkey.slice(0, 8) + '...'}</div>` : ''}
         </div>
     `;
 
     container.classList.add('visible');
     
     if (!showResults) {
-        document.querySelectorAll('.poll-option').forEach(option => {
-            option.addEventListener('click', () => {
-                document.querySelectorAll('.poll-option').forEach(o => o.classList.remove('selected'));
-                option.classList.add('selected');
-                selectedOption = option.dataset.optionId;
-                document.getElementById('vote-btn').disabled = false;
+        if (userVotedOption) {
+            // User already voted, show results button
+            document.getElementById('vote-btn').addEventListener('click', async () => {
+                showStatus('Loading results...', 'loading');
+                await displayPoll(pollEvent, true);
             });
-        });
+        } else {
+            // User hasn't voted, show voting interface
+            document.querySelectorAll('.poll-option').forEach(option => {
+                option.addEventListener('click', () => {
+                    document.querySelectorAll('.poll-option').forEach(o => o.classList.remove('selected'));
+                    option.classList.add('selected');
+                    selectedOption = option.dataset.optionId;
+                    document.getElementById('vote-btn').disabled = false;
+                });
+            });
 
-        document.getElementById('vote-btn').addEventListener('click', submitVote);
+            document.getElementById('vote-btn').addEventListener('click', submitVote);
+        }
     } else {
         document.getElementById('vote-btn').addEventListener('click', async () => {
             showStatus('Refreshing results...', 'loading');
@@ -420,25 +481,12 @@ async function submitVote() {
 
     const voteBtn = document.getElementById('vote-btn');
     voteBtn.disabled = true;
-    showStatus('Submitting vote...', 'loading');
+    showStatus('投票を送信中...', 'loading');
 
     try {
-        showStatus('Checking login status...', 'loading');
-        // Check if user is logged in with nostr-login
-        let nlPubkey;
-        try {
-            nlPubkey = await Promise.race([
-                window.NostrLogin.getPubkey(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('getPubkey timeout')), 5000))
-            ]);
-        } catch (e) {
-            nlPubkey = null;
-            showStatus('getPubkey failed or timeout, trying anyway...', 'loading');
-        }
-        
-        showStatus(`Login: ${nlPubkey ? nlPubkey.slice(0, 8) + '...' : 'none'}`, 'loading');
-        
         let signedEvent;
+        let userPubkey;
+        
         const voteEvent = {
             kind: 1018,
             content: '',
@@ -446,52 +494,56 @@ async function submitVote() {
                 ['e', pollEvent.id, '', 'poll'],
                 ['poll_option', '0', selectedOption]
             ],
-            created_at: Math.floor(Date.now() / 1000),
-            pubkey: nlPubkey || ''
+            created_at: Math.floor(Date.now() / 1000)
         };
 
-        // Try NIP-07 extension first, then nostr-login
-        if (window.nostr && typeof window.nostr.signEvent === 'function' && !nlPubkey) {
-            showStatus('Using NIP-07 extension...', 'loading');
-            signedEvent = await window.nostr.signEvent(voteEvent);
-        } else {
-            // Use nostr-login
-            if (!nlPubkey) {
-                showStatus('Please login (redirecting)...', 'loading');
+        // Use nostr-login if available, otherwise try NIP-07
+        if (window.NostrLogin) {
+            userPubkey = await window.NostrLogin.getPubkey().catch(() => null);
+            
+            if (!userPubkey) {
                 await window.NostrLogin.launch();
-                showStatus('Returned from login, getting pubkey...', 'loading');
-                nlPubkey = await window.NostrLogin.getPubkey();
-                voteEvent.pubkey = nlPubkey;
-                showStatus(`Logged in as ${nlPubkey.slice(0, 8)}...`, 'loading');
+                userPubkey = await window.NostrLogin.getPubkey();
             }
             
-            showStatus('Requesting signature (check nsec.app)...', 'loading');
-            // Wait for signEvent with timeout
-            signedEvent = await Promise.race([
-                window.NostrLogin.signEvent(voteEvent),
-                new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('No response from nsec.app after 60s. Please refresh and try again.')), 60000)
-                )
-            ]);
+            voteEvent.pubkey = userPubkey;
+            showStatus(`署名を要求中... (${userPubkey.slice(0, 8)}...)`, 'loading');
+            
+            // Check if NIP-07 is available after login
+            if (window.nostr && typeof window.nostr.signEvent === 'function') {
+                signedEvent = await window.nostr.signEvent(voteEvent);
+            } else {
+                signedEvent = await window.NostrLogin.signEvent(voteEvent);
+            }
+        } else if (window.nostr && typeof window.nostr.signEvent === 'function') {
+            userPubkey = await window.nostr.getPublicKey();
+            voteEvent.pubkey = userPubkey;
+            signedEvent = await window.nostr.signEvent(voteEvent);
+        } else {
+            throw new Error('Nostr拡張機能またはnostr-loginが必要です');
         }
         
-        showStatus('Signature received, checking...', 'loading');
         if (!signedEvent || !signedEvent.sig) {
-            throw new Error('Invalid signed event: ' + JSON.stringify(signedEvent));
+            throw new Error('署名が無効です');
         }
         
-        showStatus('Publishing vote to relays...', 'loading');
+        showStatus('リレーに送信中...', 'loading');
         await publishEvent(signedEvent);
         
-        showStatus('Vote submitted successfully!', 'success');
+        showStatus(`投票完了! (${userPubkey.slice(0, 8)}...)`, 'success');
         
         // Show results after voting
         setTimeout(() => {
             displayPoll(pollEvent, true);
         }, 1000);
+        
     } catch (error) {
-        const errorMsg = error.message || error.toString();
-        showStatus(`Error: ${errorMsg}`, 'error');
+        console.error('Vote submission error:', error);
+        if (error.message === 'Closed' || error.message.includes('closed')) {
+            showStatus('ログインがキャンセルされました', 'error');
+        } else {
+            showStatus(`エラー: ${error.message}`, 'error');
+        }
         voteBtn.disabled = false;
     }
 }
