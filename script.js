@@ -1,21 +1,21 @@
 import { createRxNostr, createRxForwardReq, uniq, verify } from 'https://esm.sh/rx-nostr';
 import { nip19 } from 'https://esm.sh/nostr-tools@2.7.0';
-import { filter, take, timeout } from 'https://esm.sh/rxjs@7.8.1';
+import { take, timeout } from 'https://esm.sh/rxjs@7.8.1';
 
 // Wait for NostrLogin to be available
 function initNostrLogin() {
-    if (window.NostrLogin) {
-        window.addEventListener('nlAuth', (e) => {
+    if (globalThis.NostrLogin) {
+        globalThis.addEventListener('nlAuth', (e) => {
             console.log('nlAuth event:', e.detail);
             showStatus(`Authenticated: ${e.detail?.type || 'unknown'}`, 'success');
         });
 
-        window.addEventListener('nlLogout', () => {
+        globalThis.addEventListener('nlLogout', () => {
             console.log('nlLogout event');
             showStatus('Logged out', 'success');
         });
 
-        window.NostrLogin.init({
+        globalThis.NostrLogin.init({
             bunkers: ['nsec.app', 'nsecbunker.com'],
             methods: ['extension', 'local', 'connect'],
             darkMode: false
@@ -91,10 +91,10 @@ async function fetchPollEvent(eventId) {
 
 async function getUserPubkey() {
     try {
-        if (window.NostrLogin) {
-            return await window.NostrLogin.getPubkey().catch(() => null);
-        } else if (window.nostr && typeof window.nostr.getPublicKey === 'function') {
-            return await window.nostr.getPublicKey();
+        if (globalThis.NostrLogin) {
+            return await globalThis.NostrLogin.getPubkey().catch(() => null);
+        } else if (globalThis.nostr && typeof globalThis.nostr.getPublicKey === 'function') {
+            return await globalThis.nostr.getPublicKey();
         }
         return null;
     } catch (error) {
@@ -498,27 +498,27 @@ async function submitVote() {
         };
 
         // Use nostr-login if available, otherwise try NIP-07
-        if (window.NostrLogin) {
-            userPubkey = await window.NostrLogin.getPubkey().catch(() => null);
+        if (globalThis.NostrLogin) {
+            userPubkey = await globalThis.NostrLogin.getPubkey().catch(() => null);
             
             if (!userPubkey) {
-                await window.NostrLogin.launch();
-                userPubkey = await window.NostrLogin.getPubkey();
+                await globalThis.NostrLogin.launch();
+                userPubkey = await globalThis.NostrLogin.getPubkey();
             }
             
             voteEvent.pubkey = userPubkey;
             showStatus(`署名を要求中... (${userPubkey.slice(0, 8)}...)`, 'loading');
             
             // Check if NIP-07 is available after login
-            if (window.nostr && typeof window.nostr.signEvent === 'function') {
-                signedEvent = await window.nostr.signEvent(voteEvent);
+            if (globalThis.nostr && typeof globalThis.nostr.signEvent === 'function') {
+                signedEvent = await globalThis.nostr.signEvent(voteEvent);
             } else {
-                signedEvent = await window.NostrLogin.signEvent(voteEvent);
+                signedEvent = await globalThis.NostrLogin.signEvent(voteEvent);
             }
-        } else if (window.nostr && typeof window.nostr.signEvent === 'function') {
-            userPubkey = await window.nostr.getPublicKey();
+        } else if (globalThis.nostr && typeof globalThis.nostr.signEvent === 'function') {
+            userPubkey = await globalThis.nostr.getPublicKey();
             voteEvent.pubkey = userPubkey;
-            signedEvent = await window.nostr.signEvent(voteEvent);
+            signedEvent = await globalThis.nostr.signEvent(voteEvent);
         } else {
             throw new Error('Nostr拡張機能またはnostr-loginが必要です');
         }
@@ -581,8 +581,8 @@ async function publishEvent(event) {
 async function init() {
     showStatus('Loading poll...', 'loading');
 
-    const hash = window.location.hash.slice(1);
-    const urlParams = new URLSearchParams(window.location.search);
+    const hash = globalThis.location.hash.slice(1);
+    const urlParams = new URLSearchParams(globalThis.location.search);
     const nevent = hash || urlParams.get('id');
 
     if (!nevent) {
